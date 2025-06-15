@@ -1,6 +1,5 @@
 import streamlit as st
 import os
-import pandas as pd
 from dotenv import load_dotenv
 import google.generativeai as genai
 
@@ -9,37 +8,41 @@ genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
 
 model = genai.GenerativeModel("gemini-2.0-flash-lite")
 
-def extract_player_name(question):
+def ask_epl_only(question):
     prompt = f"""
-    You are an assistant for English Premier League. Extract the football player's name from the question below. 
-    
-    Question: "{question}"
-    
-    If the name is found, return it. If not, return "None".
-    """
-    response = model.generate_content(prompt)
-    return response.text.strip()
+You are a strict assistant that only answers questions related to the English Premier League (EPL).
+
+You must refuse to answer any question that is not related to the EPL — including other football leagues, history, politics, science, or general knowledge.
+
+If the question is not about EPL players, clubs, results, fixtures, standings, or EPL-related transfers/stats, respond with:
+
+"Sorry, I only answer questions related to the English Premier League (EPL)."
+
+User's question: {question}
+"""
+    try:
+        response = model.generate_content(prompt)
+        return response.text.strip()
+    except Exception as e:
+        return f"Error: {e}"
+
+st.set_page_config(page_title="Premier League Chatbot", layout="centered")
+st.title("Premier League Chatbot")
+st.markdown("This assistant only answers questions about Premier League players, clubs, results and stats.")
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-st.set_page_config(page_title="Chatbot - Premier League", layout="centered")
-st.title("Premier League Chatbot")
-st.markdown("Hỏi về cầu thủ, đội bóng, kết quả")
-
-question = st.chat_input("Nhập câu hỏi...")
+question = st.chat_input("Enter your question...")
 
 if question:
     st.session_state.messages.append({"role": "user", "text": question})
 
-    with st.spinner("Đang hỏi Gemini..."):
-        response = model.generate_content(question)
-        answer = response.text.strip()
+    with st.spinner("Thinking..."):
+        answer = ask_epl_only(question)
         st.session_state.messages.append({"role": "bot", "text": answer})
 
 for msg in st.session_state.messages:
-    if msg["role"] == "user":
-        st.chat_message("user").markdown(msg["text"])
-    else:
-        st.chat_message("assistant").markdown(msg["text"])
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["text"])
 

@@ -3,6 +3,7 @@ import os
 import random
 from dotenv import load_dotenv
 import google.generativeai as genai
+import re
 
 st.set_page_config(
     page_title="Premier League Chatbot",
@@ -15,7 +16,7 @@ genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
 
 model = genai.GenerativeModel("gemini-2.0-flash-lite")
 
-greeting_keywords = ["hi", "hello", "chào", "hey", "bạn là ai", "giới thiệu", "bạn tên gì"]
+greeting_keywords = ["hi", "hello", "hey", "who are you", "introduce", "your name"]
 
 def is_greeting(question):
     q_lower = question.lower()
@@ -24,10 +25,10 @@ def is_greeting(question):
 def ask_epl_only(question):
     if is_greeting(question):
         return (
-            "Xin chào! Tôi là chatbot chuyên về Premier League (Ngoại hạng Anh). "
-            "Tôi có thể giúp bạn với thông tin về các cầu thủ, câu lạc bộ, "
-            "lịch thi đấu, kết quả, bảng xếp hạng hoặc chuyển nhượng EPL. "
-            "Hãy đặt câu hỏi nhé!"
+            "Hello! I'm a chatbot specialized in the Premier League. "
+            "I can help you with information about players, clubs, "
+            "fixtures, results, standings, or EPL transfers. "
+            "Ask me anything!"
         )
 
     prompt = f"""
@@ -46,42 +47,37 @@ User's question: {question}
     except Exception as e:
         return f"Error: {e}"
 
-# Lấy danh sách cầu thủ EPL tự động từ AI
 @st.cache_data(show_spinner=False)
 def get_epl_players():
-    prompt = "List 50 famous current Premier League players. Only return lowercase names without accents, separated by commas."
+    prompt = "List 50 current Premier League players. Return only lowercase names without accents, separated by commas. Do not explain."
     try:
         response = model.generate_content(prompt)
-        names = response.text.strip().lower().replace('\n', '').split(',')
-        return [name.strip() for name in names if name.strip()]
+        raw_text = response.text.strip().lower()
+        if ':' in raw_text:
+            raw_text = raw_text.split(':')[-1]
+        names = raw_text.replace('\n', '').split(',')
+        clean_names = []
+        for name in names:
+            name = name.strip()
+            if 3 <= len(name) <= 20 and re.match("^[a-z ]+$", name):
+                clean_names.append(name)
+        return clean_names[:40]
     except:
         return ["salah", "haaland", "rashford", "son", "saka", "foden", "rodri", "odegaard"]
 
-# Dùng AI sinh danh sách cầu thủ
 player_list = get_epl_players()
 
-# Khởi tạo correct_answer ngẫu nhiên mỗi lần load
 if "correct_answer" not in st.session_state:
     st.session_state.correct_answer = random.choice(player_list)
 
-# Bố cục 2 cột: Chatbot | Playerdle
 col1, col2 = st.columns([3, 1])
 
 with col1:
     st.title("Premier League Chatbot")
-    st.markdown("*Hỏi tôi về cầu thủ, CLB, kết quả hoặc thông tin liên quan đến Premier League.*")
+    st.markdown("*Ask me about players, clubs, results or anything related to the Premier League.*")
 
     if "messages" not in st.session_state:
         st.session_state.messages = []
-
-    question = st.chat_input("Nhập câu hỏi của bạn...")
-
-    if question:
-        st.session_state.messages.append({"role": "user", "text": question})
-
-        with st.spinner("Đang suy nghĩ..."):
-            answer = ask_epl_only(question)
-            st.session_state.messages.append({"role": "bot", "text": answer})
 
     for msg in st.session_state.messages:
         if msg["role"] == "user":
@@ -91,22 +87,31 @@ with col1:
             with st.chat_message("bot", avatar="Logo.png"):
                 st.markdown(msg["text"])
 
+    question = st.chat_input("Type your question...")
+
+    if question:
+        st.session_state.messages.append({"role": "user", "text": question})
+
+        with st.spinner("Thinking..."):
+            answer = ask_epl_only(question)
+            st.session_state.messages.append({"role": "bot", "text": answer})
+
 with col2:
     st.markdown("## 🎮 Playerdle")
     st.markdown(f"""
-    **Đoán tên cầu thủ EPL:**
-    - Bạn có 6 lượt đoán.
-    - Mỗi chữ được đánh giá:
-        - 🟩 Đúng vị trí
-        - 🟨 Đúng chữ, sai vị trí
-        - ❌ Sai hoàn toàn
-    - Gợi ý: Tên cầu thủ có **{len(st.session_state.correct_answer)} chữ cái**
+    **Guess the EPL Player Name:**
+    - You have 6 attempts.
+    - Each character will be evaluated:
+        - 🟩 Correct position
+        - 🟨 Correct letter, wrong position
+        - ❌ Wrong letter
+    - Hint: The player name has **{len(st.session_state.correct_answer)} letters**
     """)
 
     if "guesses" not in st.session_state:
         st.session_state.guesses = []
 
-    guess = st.text_input("🎯 Nhập tên cầu thủ (viết thường, không dấu)")
+    guess = st.text_input("🎯 Enter player name (lowercase, no accents)")
     if guess and guess not in st.session_state.guesses:
         st.session_state.guesses.append(guess)
 
@@ -123,14 +128,12 @@ with col2:
         st.write("".join(feedback))
 
     if st.session_state.guesses and st.session_state.guesses[-1] == st.session_state.correct_answer:
-        st.success("🎉 Chính xác! Bạn đoán đúng rồi!")
-        if st.button("🔄 Chơi lại"):
+        st.success("🎉 Correct! You guessed it!")
+        if st.button("🔄 Play again"):
             st.session_state.guesses = []
             st.session_state.correct_answer = random.choice(player_list)
     elif len(st.session_state.guesses) >= 6:
-        st.error(f"❌ Hết lượt! Đáp án là: {st.session_state.correct_answer.title()}")
-        if st.button("🔄 Chơi lại"):
+        st.error(f"❌ Out of attempts! The correct answer was: {st.session_state.correct_answer.title()}")
+        if st.button("🔄 Play again"):
             st.session_state.guesses = []
             st.session_state.correct_answer = random.choice(player_list)
-
-
